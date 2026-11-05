@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>lee-sebin 테트리스</title>
+<style>
+:root{
+  --bg:#f3efe6;--panel:#e6e0d2;--ink:#2b2a33;--muted:#6d6a75;--grid:#d9d2c1;--btn:#2b2a33;--btnink:#f3efe6;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1d1c24;--panel:#2a2833;--ink:#ece8dc;--muted:#9a96a6;--grid:#34323f;--btn:#ece8dc;--btnink:#1d1c24}}
+:root[data-theme="dark"]{--bg:#1d1c24;--panel:#2a2833;--ink:#ece8dc;--muted:#9a96a6;--grid:#34323f;--btn:#ece8dc;--btnink:#1d1c24}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font-family:"Gowun Dodum","Apple SD Gothic Neo","Malgun Gothic",sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;user-select:none;-webkit-user-select:none;touch-action:manipulation;overflow:hidden}
+.top{display:flex;gap:10px;align-items:stretch}
+canvas{background:var(--panel);border-radius:6px;display:block}
+.side{display:flex;flex-direction:column;gap:8px;width:84px}
+.box{background:var(--panel);border-radius:6px;padding:8px;font-size:13px;color:var(--muted)}
+.box b{display:block;font-size:20px;color:var(--ink);font-weight:700}
+#next{width:100%;height:auto;background:transparent}
+.ctrl{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;width:min(92vw,360px)}
+.ctrl button{height:52px;border:0;border-radius:10px;background:var(--btn);color:var(--btnink);font-size:20px;font-family:inherit}
+.ctrl button:active{opacity:.7}
+#ov{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:color-mix(in srgb,var(--bg) 88%,transparent);text-align:center}
+#ov h1{font-size:44px;margin:0;letter-spacing:.08em}
+#ov p{margin:0;color:var(--muted);font-size:15px;line-height:1.6}
+#go{padding:12px 32px;font-size:18px;border:0;border-radius:10px;background:var(--btn);color:var(--btnink);font-family:inherit}
+</style>
+</head>
+<body>
+<div class="top">
+  <canvas id="c" width="200" height="400"></canvas>
+  <div class="side">
+    <div class="box">다음<canvas id="next" width="64" height="64"></canvas></div>
+    <div class="box">점수<b id="sc">0</b></div>
+    <div class="box">줄<b id="ln">0</b></div>
+    <div class="box">레벨<b id="lv">1</b></div>
+  </div>
+</div>
+<div class="ctrl">
+  <button id="bl">◀</button><button id="br">▶</button><button id="bd">▼</button><button id="bro">↻</button><button id="bh">⤓</button>
+</div>
+<div id="ov"><h1>테트리스</h1><p style="font-size:18px;color:var(--ink)">lee-sebin</p><p id="msg">←→ 이동 · ↑ 회전 · ↓ 내리기<br>스페이스 즉시 낙하 · P 일시정지</p><button id="go">시작</button></div>
+<script>
+const COLS=10,ROWS=20,S=20;
+const cv=document.getElementById('c'),cx=cv.getContext('2d');
+const nx=document.getElementById('next').getContext('2d');
+const COLORS=['','#4cc9d9','#f2c14e','#9b6fd1','#6fbf73','#e4572e','#3f6fd1','#f08a3c'];
+const SH=[null,
+ [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+ [[2,2],[2,2]],
+ [[0,3,0],[3,3,3],[0,0,0]],
+ [[0,4,4],[4,4,0],[0,0,0]],
+ [[5,5,0],[0,5,5],[0,0,0]],
+ [[6,0,0],[6,6,6],[0,0,0]],
+ [[0,0,7],[7,7,7],[0,0,0]]];
+let board,cur,nextId,score,lines,level,over,paused,running=false,last=0,acc=0;
+const bag=[];
+function draw1(){if(!bag.length){bag.push(1,2,3,4,5,6,7);for(let i=6;i>0;i--){const j=Math.random()*(i+1)|0;[bag[i],bag[j]]=[bag[j],bag[i]]}}return bag.pop()}
+function mk(id){const m=SH[id].map(r=>r.slice());return{m,x:(COLS-m.length)/2|0,y:0}}
+function hit(p,dx=0,dy=0,m=p.m){for(let y=0;y<m.length;y++)for(let x=0;x<m.length;x++)if(m[y][x]){const bx=p.x+x+dx,by=p.y+y+dy;if(bx<0||bx>=COLS||by>=ROWS||(by>=0&&board[by][bx]))return true}return false}
+function rot(m){const n=m.length;return m.map((_,y)=>m.map((_,x)=>m[n-1-x][y]))}
+function spawn(){cur=mk(nextId);nextId=draw1();if(hit(cur))end();drawNext()}
+function move(d){if(!running||paused)return;if(!hit(cur,d,0))cur.x+=d;render()}
+function turn(){if(!running||paused)return;const r=rot(cur.m);for(const k of[0,-1,1,-2,2])if(!hit(cur,k,0,r)){cur.m=r;cur.x+=k;break}render()}
+function drop(){if(!running||paused)return;if(!hit(cur,0,1)){cur.y++}else lock();render()}
+function hard(){if(!running||paused)return;let n=0;while(!hit(cur,0,1)){cur.y++;n++}score+=n*2;lock();render()}
+function lock(){
+  cur.m.forEach((r,y)=>r.forEach((v,x)=>{if(v&&cur.y+y>=0)board[cur.y+y][cur.x+x]=v}));
+  let c=0;for(let y=ROWS-1;y>=0;y--)if(board[y].every(v=>v)){board.splice(y,1);board.unshift(Array(COLS).fill(0));c++;y++}
+  if(c){score+=[0,100,300,500,800][c]*level;lines+=c;level=1+(lines/10|0)}
+  stats();spawn();
+}
+function stats(){sc.textContent=score;ln.textContent=lines;lv.textContent=level}
+function cell(g,x,y,v,s){g.fillStyle=COLORS[v];g.fillRect(x*s+1,y*s+1,s-2,s-2)}
+function render(){
+  cx.clearRect(0,0,200,400);
+  cx.strokeStyle=getComputedStyle(document.body).getPropertyValue('--grid');cx.lineWidth=1;
+  for(let i=1;i<COLS;i++){cx.beginPath();cx.moveTo(i*S,0);cx.lineTo(i*S,400);cx.stroke()}
+  for(let i=1;i<ROWS;i++){cx.beginPath();cx.moveTo(0,i*S);cx.lineTo(200,i*S);cx.stroke()}
+  board.forEach((r,y)=>r.forEach((v,x)=>v&&cell(cx,x,y,v,S)));
+  if(!cur)return;
+  let gy=0;while(!hit(cur,0,gy+1))gy++;
+  cur.m.forEach((r,y)=>r.forEach((v,x)=>{if(v){cx.globalAlpha=.25;cell(cx,cur.x+x,cur.y+y+gy,v,S);cx.globalAlpha=1;cell(cx,cur.x+x,cur.y+y,v,S)}}));
+}
+function drawNext(){nx.clearRect(0,0,64,64);const m=SH[nextId],o=(4-m.length)*8;m.forEach((r,y)=>r.forEach((v,x)=>v&&cell(nx,x+o/16+.5*(4-m.length)/1*0+(4-m.length)/2*0,y,v,16)))}
+function loop(t){
+  if(running&&!paused){acc+=t-last;const sp=Math.max(80,800-(level-1)*70);if(acc>sp){acc=0;drop()}}
+  last=t;requestAnimationFrame(loop);
+}
+function end(){running=false;over=true;msg.innerHTML='점수 '+score+'점 · '+lines+'줄<br>다시 도전해 보세요';ov.querySelector('h1').textContent='게임 오버';go.textContent='다시 시작';ov.style.display='flex'}
+function start(){board=Array.from({length:ROWS},()=>Array(COLS).fill(0));score=lines=0;level=1;over=false;paused=false;nextId=draw1();stats();spawn();running=true;ov.style.display='none';render()}
+function pause(){if(!running)return;paused=!paused;if(paused){ov.querySelector('h1').textContent='일시정지';msg.textContent='계속하려면 버튼을 누르세요';go.textContent='계속';ov.style.display='flex'}else ov.style.display='none'}
+go.onclick=()=>{if(paused)pause();else start()};
+const bind=(id,f)=>{const b=document.getElementById(id);b.addEventListener('pointerdown',e=>{e.preventDefault();f()})};
+bind('bl',()=>move(-1));bind('br',()=>move(1));bind('bd',drop);bind('bro',turn);bind('bh',hard);
+addEventListener('keydown',e=>{
+  const k=e.key;
+  if(k==='ArrowLeft')move(-1);else if(k==='ArrowRight')move(1);else if(k==='ArrowDown')drop();
+  else if(k==='ArrowUp')turn();else if(k===' ')hard();else if(k==='p'||k==='P')pause();
+  if(['ArrowLeft','ArrowRight','ArrowDown','ArrowUp',' '].includes(k))e.preventDefault();
+});
+function fit(){const h=innerHeight-env_pad();const s=Math.min(1,(h-110)/400,(innerWidth-30)/320);cv.style.width=200*s+'px';cv.style.height=400*s+'px'}
+function env_pad(){return 80}
+addEventListener('resize',fit);fit();
+board=Array.from({length:ROWS},()=>Array(COLS).fill(0));render();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
